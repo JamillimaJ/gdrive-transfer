@@ -146,6 +146,18 @@ from worker import transfer_file_task
 import uuid
 @router.post("/api/transfer")
 async def start_transfer(req: TransferRequest, user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(models.DriveAccount.id).where(
+            models.DriveAccount.user_id == user.id,
+            models.DriveAccount.id.in_([req.source_account_id, req.dest_account_id])
+        )
+    )
+    owned_accounts = set(result.scalars().all())
+    required_accounts = {req.source_account_id, req.dest_account_id}
+    
+    if not required_accounts.issubset(owned_accounts):
+        raise HTTPException(status_code=403, detail="Not authorized to use one or both accounts")
+
     task_id = str(uuid.uuid4())
     log = models.TransferLog(
         id=task_id,
