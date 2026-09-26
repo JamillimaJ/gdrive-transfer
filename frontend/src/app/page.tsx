@@ -21,11 +21,20 @@ interface HistoryItem {
   name: string;
 }
 
+interface TransferPayload {
+  sourceAccountId: number;
+  destAccountId: number;
+  fileId: string;
+  destFolderId: string;
+}
+
 interface ActiveTransfer {
   taskId: string;
   fileName: string;
   progress: number;
   status: string;
+  payload: TransferPayload;
+  timestamp: number;
 }
 
 export default function Home() {
@@ -50,9 +59,11 @@ export default function Home() {
   const [globalLeftPublishers, setGlobalLeftPublishers] = useState<string[]>([]);
   const [globalRightPublishers, setGlobalRightPublishers] = useState<string[]>([]);
   
-  // Filters State
+  // Filters & Search State
   const [leftOwnerFilter, setLeftOwnerFilter] = useState<Set<string>>(new Set());
   const [rightOwnerFilter, setRightOwnerFilter] = useState<Set<string>>(new Set());
+  const [leftSearchQuery, setLeftSearchQuery] = useState("");
+  const [rightSearchQuery, setRightSearchQuery] = useState("");
   
   // Dropdown UI State
   const [leftFilterOpen, setLeftFilterOpen] = useState(false);
@@ -60,6 +71,7 @@ export default function Home() {
 
   // Transfers State
   const [activeTransfers, setActiveTransfers] = useState<ActiveTransfer[]>([]);
+  const [transferHistory, setTransferHistory] = useState<ActiveTransfer[]>([]);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const [isMounted, setIsMounted] = useState(false);
@@ -72,11 +84,14 @@ export default function Home() {
   useEffect(() => {
     setIsMounted(true);
     
-    // Load history from session
+    // Load state from session
     const savedLeft = sessionStorage.getItem("leftHistory");
     const savedRight = sessionStorage.getItem("rightHistory");
+    const savedTransfers = localStorage.getItem("transferHistory");
+    
     if (savedLeft) setLeftHistory(JSON.parse(savedLeft));
     if (savedRight) setRightHistory(JSON.parse(savedRight));
+    if (savedTransfers) setTransferHistory(JSON.parse(savedTransfers));
 
     const urlParams = new URLSearchParams(window.location.search);
     const urlToken = urlParams.get('token');
@@ -116,7 +131,7 @@ export default function Home() {
       });
   }, [router]);
 
-  // Save history to session
+  // Save state to session
   useEffect(() => {
     if (isMounted) sessionStorage.setItem("leftHistory", JSON.stringify(leftHistory));
   }, [leftHistory, isMounted]);
@@ -124,6 +139,10 @@ export default function Home() {
   useEffect(() => {
     if (isMounted) sessionStorage.setItem("rightHistory", JSON.stringify(rightHistory));
   }, [rightHistory, isMounted]);
+
+  useEffect(() => {
+    if (isMounted) localStorage.setItem("transferHistory", JSON.stringify(transferHistory));
+  }, [transferHistory, isMounted]);
 
   // Reset folder history and fetch global publishers if right account CHANGES (not on first load)
   useEffect(() => {
@@ -137,6 +156,7 @@ export default function Home() {
     if (!leftAccount) return;
     setLeftSelected(new Set());
     setLeftOwnerFilter(new Set());
+    setLeftSearchQuery("");
     const token = localStorage.getItem("token");
     fetch(`http://localhost:8000/api/accounts/${leftAccount}/publishers`, {
       headers: { "Authorization": `Bearer ${token}` }
@@ -149,6 +169,7 @@ export default function Home() {
     if (!rightAccount) return;
     setRightSelected(new Set());
     setRightOwnerFilter(new Set());
+    setRightSearchQuery("");
     const token = localStorage.getItem("token");
     fetch(`http://localhost:8000/api/accounts/${rightAccount}/publishers`, {
       headers: { "Authorization": `Bearer ${token}` }
@@ -236,25 +257,35 @@ export default function Home() {
 
     if (sourceAccountId === destAccountId || fileIds.length === 0) return;
 
+    const sourceFiles = sourceAccountId === leftAccount ? leftFiles : rightFiles;
+    await initiateTransfers(fileIds, sourceAccountId, destAccountId, destFolderId, sourceFiles);
+    
+    // Clear selection after drop
+    if (sourceAccountId === leftAccount) setLeftSelected(new Set());
+    if (sourceAccountId === rightAccount) setRightSelected(new Set());
+  };
+
+  const initiateTransfers = async (fileIds: string[], sourceAccountId: number, destAccountId: number, destFolderId: string, sourceFiles: FileItem[]) => {
     const token = localStorage.getItem("token");
     const newTransfers: ActiveTransfer[] = [];
-    const sourceFiles = sourceAccountId === leftAccount ? leftFiles : rightFiles;
     
     for (const fileId of fileIds) {
       const fName = sourceFiles.find(f => f.id === fileId)?.name || "Unknown File";
       
+      const payload: TransferPayload = {
+        source_account_id: sourceAccountId,
+        dest_account_id: destAccountId,
+        file_id: fileId,
+        dest_folder_id: destFolderId,
+      };
+
       const res = await fetch("http://localhost:8000/api/transfer", {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({
-          source_account_id: sourceAccountId,
-          dest_account_id: destAccountId,
-          file_id: fileId,
-          dest_folder_id: destFolderId,
-        }),
+        body: JSON.stringify(payload),
       });
       
       if (res.ok) {
@@ -263,16 +294,49 @@ export default function Home() {
           taskId: data.task_id,
           fileName: fName,
           progress: 0,
-          status: 'PENDING'
+          status: 'PENDING',
+          payload: payload,
+          timestamp: Date.now()
         });
       }
     }
     
-    setActiveTransfers(prev => [...prev, ...newTransfers]);
+    setActiveTransfers(prev => [...newTransfers, ...prev]);
+  };
+
+  const handleRetry = async (job: ActiveTransfer) => {
+    // Remove from history
+    setTransferHistory(prev => prev.filter(t => t.taskId !== job.taskId));
     
-    // Clear selection after drop
-    if (sourceAccountId === leftAccount) setLeftSelected(new Set());
-    if (sourceAccountId === rightAccount) setRightSelected(new Set());
+    const token = localStorage.getItem("token");
+    const res = await fetch("http://localhost:8000/api/transfer", {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify(job.payload),
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      setActiveTransfers(prev => [{
+        taskId: data.task_id,
+        fileName: job.fileName,
+        progress: 0,
+        status: 'PENDING',
+        payload: job.payload,
+        timestamp: Date.now()
+      }, ...prev]);
+    }
+  };
+
+  const handleClearActiveLog = () => {
+    setTransferHistory(prev => {
+      // Prepend all completed active transfers into history (keep max 100)
+      return [...activeTransfers, ...prev].slice(0, 100);
+    });
+    setActiveTransfers([]);
   };
 
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
@@ -297,8 +361,17 @@ export default function Home() {
   const leftUniqueOwners = Array.from(new Set([...globalLeftPublishers, ...leftFiles.map(f => f.owner || "Unknown")])).sort();
   const rightUniqueOwners = Array.from(new Set([...globalRightPublishers, ...rightFiles.map(f => f.owner || "Unknown")])).sort();
 
-  const visibleLeftFiles = leftFiles.filter(f => leftOwnerFilter.size === 0 || leftOwnerFilter.has(f.owner || "Unknown"));
-  const visibleRightFiles = rightFiles.filter(f => rightOwnerFilter.size === 0 || rightOwnerFilter.has(f.owner || "Unknown"));
+  const visibleLeftFiles = leftFiles.filter(f => {
+    const matchesOwner = leftOwnerFilter.size === 0 || leftOwnerFilter.has(f.owner || "Unknown");
+    const matchesSearch = f.name.toLowerCase().includes(leftSearchQuery.toLowerCase());
+    return matchesOwner && matchesSearch;
+  });
+  
+  const visibleRightFiles = rightFiles.filter(f => {
+    const matchesOwner = rightOwnerFilter.size === 0 || rightOwnerFilter.has(f.owner || "Unknown");
+    const matchesSearch = f.name.toLowerCase().includes(rightSearchQuery.toLowerCase());
+    return matchesOwner && matchesSearch;
+  });
 
   const primaryAccountDetails = accounts.find(a => a.id === leftAccount);
   const secondaryAccountDetails = accounts.find(a => a.id === rightAccount);
@@ -387,7 +460,7 @@ export default function Home() {
           </div>
           {activeTransfers.every(t => t.status === 'SUCCESS' || t.status === 'FAILURE') && (
             <button 
-              onClick={() => setActiveTransfers([])}
+              onClick={handleClearActiveLog}
               className="mt-6 border-2 border-foreground bg-transparent px-6 py-2 font-mono text-xs font-bold uppercase tracking-widest text-foreground hover:bg-foreground hover:text-background transition-colors w-full"
             >
               Acknowledge & Clear Log
@@ -429,16 +502,16 @@ export default function Home() {
               {renderBreadcrumbs(leftHistory, setLeftHistory)}
             </div>
 
-            {/* Custom Left Dropdown Filter */}
-            {leftUniqueOwners.length > 0 && (
-              <div className="relative mb-4 pb-3 border-b border-foreground/30 flex flex-wrap items-center gap-4">
-                <span className="font-mono text-xs uppercase tracking-widest text-neutral-500">Filter Publisher:</span>
-                
+            {/* Custom Left Dropdown Filter & Search */}
+            <div className="mb-4 pb-3 border-b border-foreground/30 flex flex-col lg:flex-row gap-4 lg:items-center justify-between">
+              
+              <div className="relative flex items-center gap-4">
+                <span className="font-mono text-xs uppercase tracking-widest text-neutral-500">Publisher:</span>
                 <button 
                   onClick={() => setLeftFilterOpen(!leftFilterOpen)}
-                  className="flex items-center justify-between border border-foreground bg-background px-3 py-1.5 font-sans text-sm min-w-[200px] hover:bg-neutral-100 transition-colors"
+                  className="flex items-center justify-between border border-foreground bg-background px-3 py-1.5 font-sans text-sm min-w-[160px] hover:bg-neutral-100 transition-colors"
                 >
-                  <span className="font-bold truncate max-w-[150px]">
+                  <span className="font-bold truncate max-w-[120px]">
                     {leftOwnerFilter.size === 0 
                       ? "All Names" 
                       : leftOwnerFilter.size === 1 
@@ -451,7 +524,7 @@ export default function Home() {
                 {leftFilterOpen && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setLeftFilterOpen(false)}></div>
-                    <div className="absolute top-[36px] left-[140px] mt-1 w-64 border-2 border-foreground bg-background shadow-[4px_4px_0px_0px_#111111] z-50 max-h-64 overflow-y-auto">
+                    <div className="absolute top-[36px] left-[85px] mt-1 w-64 border-2 border-foreground bg-background shadow-[4px_4px_0px_0px_#111111] z-50 max-h-64 overflow-y-auto">
                       <label className="flex items-center gap-3 p-3 border-b border-muted cursor-pointer hover:bg-neutral-100 transition-colors">
                         <input 
                           type="checkbox"
@@ -487,7 +560,18 @@ export default function Home() {
                   </>
                 )}
               </div>
-            )}
+
+              <div className="flex-1 max-w-[250px]">
+                <input 
+                  type="text" 
+                  placeholder="Search files..."
+                  className="w-full border border-foreground bg-transparent px-3 py-1.5 font-sans text-sm placeholder:text-neutral-400 focus-visible:outline-none focus-visible:bg-neutral-100"
+                  value={leftSearchQuery}
+                  onChange={(e) => setLeftSearchQuery(e.target.value)}
+                />
+              </div>
+
+            </div>
             
             {/* Selection Status Banner */}
             {leftSelected.size > 0 && (
@@ -583,16 +667,16 @@ export default function Home() {
               {renderBreadcrumbs(rightHistory, setRightHistory)}
             </div>
 
-            {/* Custom Right Dropdown Filter */}
-            {rightUniqueOwners.length > 0 && (
-              <div className="relative mb-4 pb-3 border-b border-foreground/30 flex flex-wrap items-center gap-4">
-                <span className="font-mono text-xs uppercase tracking-widest text-neutral-500">Filter Publisher:</span>
-                
+            {/* Custom Right Dropdown Filter & Search */}
+            <div className="mb-4 pb-3 border-b border-foreground/30 flex flex-col lg:flex-row gap-4 lg:items-center justify-between">
+              
+              <div className="relative flex items-center gap-4">
+                <span className="font-mono text-xs uppercase tracking-widest text-neutral-500">Publisher:</span>
                 <button 
                   onClick={() => setRightFilterOpen(!rightFilterOpen)}
-                  className="flex items-center justify-between border border-foreground bg-background px-3 py-1.5 font-sans text-sm min-w-[200px] hover:bg-neutral-100 transition-colors"
+                  className="flex items-center justify-between border border-foreground bg-background px-3 py-1.5 font-sans text-sm min-w-[160px] hover:bg-neutral-100 transition-colors"
                 >
-                  <span className="font-bold truncate max-w-[150px]">
+                  <span className="font-bold truncate max-w-[120px]">
                     {rightOwnerFilter.size === 0 
                       ? "All Names" 
                       : rightOwnerFilter.size === 1 
@@ -605,7 +689,7 @@ export default function Home() {
                 {rightFilterOpen && (
                   <>
                     <div className="fixed inset-0 z-40" onClick={() => setRightFilterOpen(false)}></div>
-                    <div className="absolute top-[36px] left-[140px] mt-1 w-64 border-2 border-foreground bg-background shadow-[4px_4px_0px_0px_#111111] z-50 max-h-64 overflow-y-auto">
+                    <div className="absolute top-[36px] left-[85px] mt-1 w-64 border-2 border-foreground bg-background shadow-[4px_4px_0px_0px_#111111] z-50 max-h-64 overflow-y-auto">
                       <label className="flex items-center gap-3 p-3 border-b border-muted cursor-pointer hover:bg-neutral-100 transition-colors">
                         <input 
                           type="checkbox"
@@ -641,7 +725,18 @@ export default function Home() {
                   </>
                 )}
               </div>
-            )}
+
+              <div className="flex-1 max-w-[250px]">
+                <input 
+                  type="text" 
+                  placeholder="Search files..."
+                  className="w-full border border-foreground bg-transparent px-3 py-1.5 font-sans text-sm placeholder:text-neutral-400 focus-visible:outline-none focus-visible:bg-neutral-100"
+                  value={rightSearchQuery}
+                  onChange={(e) => setRightSearchQuery(e.target.value)}
+                />
+              </div>
+
+            </div>
             
             {/* Selection Status Banner */}
             {rightSelected.size > 0 && (
@@ -710,6 +805,46 @@ export default function Home() {
         </div>
       )}
       
+      {/* Transfer History Archive */}
+      {transferHistory.length > 0 && (
+        <div className="mt-8 border-4 border-foreground bg-background newsprint-texture p-6 shadow-[8px_8px_0px_0px_#111111]">
+          <h3 className="font-serif font-black uppercase text-2xl mb-4 border-b-2 border-foreground pb-2 flex justify-between items-end">
+            <span>Archive: Past Transfers</span>
+            <button 
+              onClick={() => { setTransferHistory([]); localStorage.removeItem("transferHistory"); }}
+              className="font-mono text-xs hover:underline decoration-2 underline-offset-4"
+            >
+              Clear Archive
+            </button>
+          </h3>
+          <div className="space-y-0 max-h-64 overflow-y-auto">
+            {transferHistory.map((job, i) => (
+              <div key={`${job.taskId}-${i}`} className="flex justify-between items-center border-b border-muted py-3 px-2 hover:bg-neutral-100 transition-colors">
+                <div className="flex flex-col">
+                  <span className="font-sans font-bold text-sm truncate max-w-md">{job.fileName}</span>
+                  <span className="font-mono text-xs text-neutral-500 uppercase tracking-widest mt-1">
+                    {new Date(job.timestamp).toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex items-center gap-6">
+                  <span className={`font-mono text-xs font-bold uppercase tracking-widest ${job.status === 'SUCCESS' ? 'text-green-700' : 'text-accent'}`}>
+                    [{job.status}]
+                  </span>
+                  {job.status === 'FAILURE' && (
+                    <button 
+                      onClick={() => handleRetry(job)}
+                      className="border-2 border-foreground px-4 py-1.5 font-mono text-xs font-bold uppercase tracking-widest text-foreground hover:bg-foreground hover:text-background transition-colors"
+                    >
+                      Retry File
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <footer className="mt-12 border-t-2 border-foreground pt-4 flex justify-between font-mono text-xs uppercase tracking-widest text-neutral-500">
         <span>© {new Date().getFullYear()} Multi-Drive Publisher</span>
         <span>Vol 1.0 — Printed in Localhost</span>
