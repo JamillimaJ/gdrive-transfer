@@ -278,12 +278,27 @@ async def delete_account(account_id: int, user: models.User = Depends(get_curren
     
     if not account:
         raise HTTPException(status_code=404, detail="Account not found")
-        
+
+    from worker import celery_app
+    active_result = await db.execute(
+        select(models.TransferLog).where(
+            models.TransferLog.user_id == user.id,
+            models.TransferLog.status.in_(["PENDING", "PROGRESS"]),
+            (models.TransferLog.source_account_id == account_id) |
+            (models.TransferLog.dest_account_id == account_id)
+        )
+    )
+    for log in active_result.scalars().all():
+        celery_app.control.revoke(log.id, terminate=True, signal='SIGTERM')
+        log.status = "CANCELLED"
+        log.error_message = "Cancelled by user"
+
     await db.execute(delete(models.TransferLog).where(
+        models.TransferLog.user_id == user.id,
         (models.TransferLog.source_account_id == account_id) |
         (models.TransferLog.dest_account_id == account_id)
     ))
-    
+
     await db.delete(account)
     await db.commit()
     return {"status": "success"}
