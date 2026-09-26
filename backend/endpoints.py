@@ -12,6 +12,7 @@ class TransferRequest(BaseModel):
     source_account_id: int
     dest_account_id: int
     file_id: str
+    file_name: str
     dest_folder_id: str
 
 @router.get("/api/accounts")
@@ -142,15 +143,28 @@ async def get_publishers(
 
 from worker import transfer_file_task
 
+import uuid
 @router.post("/api/transfer")
-def start_transfer(req: TransferRequest):
-    task = transfer_file_task.delay(
-        req.source_account_id, 
-        req.dest_account_id, 
-        req.file_id, 
-        req.dest_folder_id
+async def start_transfer(req: TransferRequest, user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    task_id = str(uuid.uuid4())
+    log = models.TransferLog(
+        id=task_id,
+        user_id=user.id,
+        source_account_id=req.source_account_id,
+        dest_account_id=req.dest_account_id,
+        file_id=req.file_id,
+        file_name=req.file_name,
+        dest_folder_id=req.dest_folder_id,
+        status="PENDING"
     )
-    return {"task_id": task.id, "status": "started"}
+    db.add(log)
+    await db.commit()
+    
+    task = transfer_file_task.apply_async(
+        args=[req.source_account_id, req.dest_account_id, req.file_id, req.dest_folder_id],
+        task_id=task_id
+    )
+    return {"task_id": task_id, "status": "started"}
 
 @router.get("/api/transfer/{task_id}")
 def get_transfer_status(task_id: str):
@@ -168,3 +182,66 @@ def get_transfer_status(task_id: str):
     else:
         response = {'state': task_result.state, 'error': str(task_result.info)}
     return response
+
+
+@router.get("/api/transfers/history")
+async def get_transfer_history(user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import desc
+    result = await db.execute(
+        select(models.TransferLog)
+        .where(models.TransferLog.user_id == user.id)
+        .order_by(desc(models.TransferLog.created_at))
+        .limit(100)
+    )
+    logs = result.scalars().all()
+    return [{
+        "taskId": log.id,
+        "fileName": log.file_name,
+        "progress": 100 if log.status == "SUCCESS" else 0,
+        "status": log.status,
+        "timestamp": int(log.created_at.timestamp() * 1000) if log.created_at else 0,
+        "payload": {
+            "source_account_id": log.source_account_id,
+            "dest_account_id": log.dest_account_id,
+            "file_id": log.file_id,
+            "file_name": log.file_name,
+            "dest_folder_id": log.dest_folder_id
+        }
+    } for log in logs]
+
+
+@router.get("/api/transfers/active")
+async def get_active_transfers(user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(models.TransferLog)
+        .where(models.TransferLog.user_id == user.id)
+        .where(models.TransferLog.status == "PENDING")
+    )
+    logs = result.scalars().all()
+    return [{
+        "taskId": log.id,
+        "fileName": log.file_name,
+        "progress": 0,
+        "status": "PENDING",
+        "timestamp": int(log.created_at.timestamp() * 1000) if log.created_at else 0,
+        "payload": {
+            "source_account_id": log.source_account_id,
+            "dest_account_id": log.dest_account_id,
+            "file_id": log.file_id,
+            "file_name": log.file_name,
+            "dest_folder_id": log.dest_folder_id
+        }
+    } for log in logs]
+
+
+@router.delete("/api/transfers/history/{task_id}")
+async def delete_transfer_log(task_id: str, user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(models.TransferLog)
+        .where(models.TransferLog.id == task_id, models.TransferLog.user_id == user.id)
+    )
+    log = result.scalars().first()
+    if log:
+        await db.delete(log)
+        await db.commit()
+    return {"status": "deleted"}

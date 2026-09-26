@@ -25,6 +25,23 @@ celery_app.conf.update(
     enable_utc=True,
 )
 
+
+async def update_transfer_log(task_id: str, status: str, error_message: str = None):
+    engine = create_async_engine(DATABASE_URL, echo=False, poolclass=NullPool)
+    try:
+        async with AsyncSession(engine) as session:
+            result = await session.execute(select(models.TransferLog).where(models.TransferLog.id == task_id))
+            log = result.scalars().first()
+            if log:
+                log.status = status
+                if error_message:
+                    log.error_message = error_message
+                await session.commit()
+    except Exception as e:
+        print(f"Failed to update transfer log: {e}")
+    finally:
+        await engine.dispose()
+
 async def get_credentials(account_id: int):
     # Create the engine INSIDE the function with NullPool so Celery worker forks don't share broken sockets
     engine = create_async_engine(DATABASE_URL, echo=False, poolclass=NullPool)
@@ -118,10 +135,12 @@ def _sync_transfer(self, source_account_id, dest_account_id, file_id, dest_folde
     try:
         new_id = _copy_item(source_service, dest_service, dest_email, file_id, dest_folder_id)
         self.update_state(state='PROGRESS', meta={'current': 100, 'total': 100})
+        asyncio.run(update_transfer_log(self.request.id, 'SUCCESS'))
         return {"status": "completed", "file_id": file_id, "new_file_id": new_id}
     except Exception as e:
         import traceback
         traceback.print_exc()
+        asyncio.run(update_transfer_log(self.request.id, 'FAILURE', str(e)))
         raise Exception(f"Transfer failed: {str(e)}")
 
 @celery_app.task(bind=True)

@@ -22,10 +22,11 @@ interface HistoryItem {
 }
 
 interface TransferPayload {
-  sourceAccountId: number;
-  destAccountId: number;
-  fileId: string;
-  destFolderId: string;
+  source_account_id: number;
+  dest_account_id: number;
+  file_id: string;
+  file_name: string;
+  dest_folder_id: string;
 }
 
 interface ActiveTransfer {
@@ -91,7 +92,28 @@ export default function Home() {
     
     if (savedLeft) setLeftHistory(JSON.parse(savedLeft));
     if (savedRight) setRightHistory(JSON.parse(savedRight));
-    if (savedTransfers) setTransferHistory(JSON.parse(savedTransfers));
+    
+    const historyToken = localStorage.getItem("token");
+    if (historyToken) {
+      fetch("http://localhost:8000/api/transfers/history", {
+        headers: { "Authorization": `Bearer ${historyToken}` }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) setTransferHistory(data);
+      })
+      .catch(() => {});
+      
+      fetch("http://localhost:8000/api/transfers/active", {
+        headers: { "Authorization": `Bearer ${historyToken}` }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) setActiveTransfers(data);
+      })
+      .catch(() => {});
+    }
+
 
     const urlParams = new URLSearchParams(window.location.search);
     const urlToken = urlParams.get('token');
@@ -140,9 +162,7 @@ export default function Home() {
     if (isMounted) sessionStorage.setItem("rightHistory", JSON.stringify(rightHistory));
   }, [rightHistory, isMounted]);
 
-  useEffect(() => {
-    if (isMounted) localStorage.setItem("transferHistory", JSON.stringify(transferHistory));
-  }, [transferHistory, isMounted]);
+  
 
   // Reset folder history and fetch global publishers if right account CHANGES (not on first load)
   useEffect(() => {
@@ -276,6 +296,7 @@ export default function Home() {
         source_account_id: sourceAccountId,
         dest_account_id: destAccountId,
         file_id: fileId,
+        file_name: fName,
         dest_folder_id: destFolderId,
       };
 
@@ -309,6 +330,13 @@ export default function Home() {
     setTransferHistory(prev => prev.filter(t => t.taskId !== job.taskId));
     
     const token = localStorage.getItem("token");
+    
+    // Delete old failure log from the database
+    fetch(`http://localhost:8000/api/transfers/history/${job.taskId}`, {
+      method: "DELETE",
+      headers: { "Authorization": `Bearer ${token}` }
+    }).catch(() => {});
+
     const res = await fetch("http://localhost:8000/api/transfer", {
       method: "POST",
       headers: { 
@@ -332,11 +360,15 @@ export default function Home() {
   };
 
   const handleClearActiveLog = () => {
-    setTransferHistory(prev => {
-      // Prepend all completed active transfers into history (keep max 100)
-      return [...activeTransfers, ...prev].slice(0, 100);
-    });
     setActiveTransfers([]);
+    const token = localStorage.getItem("token");
+    fetch("http://localhost:8000/api/transfers/history", {
+      headers: { "Authorization": `Bearer ${token}` }
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (Array.isArray(data)) setTransferHistory(data);
+    });
   };
 
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
