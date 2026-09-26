@@ -370,6 +370,20 @@ const handleCancel = async (job: ActiveTransfer) => {
     }).catch(() => {});
   };
 
+const handleRemoveAccount = async (accountId: number) => {
+    if (!confirm("Are you sure you want to disconnect this account?")) return;
+    const token = localStorage.getItem("token");
+    try {
+      const res = await fetch(`http://localhost:8000/api/accounts/${accountId}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        window.location.reload();
+      }
+    } catch (e) {}
+  };
+
   const handleClearActiveLog = () => {
     setActiveTransfers([]);
     const token = localStorage.getItem("token");
@@ -540,7 +554,12 @@ const handleCancel = async (job: ActiveTransfer) => {
             onDragOver={handleDragOver}
           >
             <div className="mb-6">
-              <label className="block font-mono text-xs uppercase tracking-widest text-neutral-500 mb-2">Primary Archive (Locked)</label>
+              <div className="flex justify-between items-center mb-2">
+                <label className="block font-mono text-xs uppercase tracking-widest text-neutral-500">Primary Archive (Locked)</label>
+                {leftAccount && (
+                  <button onClick={() => handleRemoveAccount(leftAccount)} className="text-[10px] text-accent underline hover:text-red-700 cursor-pointer">Disconnect</button>
+                )}
+              </div>
               <div className="w-full border-b-2 border-foreground bg-transparent py-2 font-serif text-2xl font-bold truncate">
                 {primaryAccountDetails ? `${primaryAccountDetails.name} — ${primaryAccountDetails.email}` : "No Primary Account"}
               </div>
@@ -693,7 +712,12 @@ const handleCancel = async (job: ActiveTransfer) => {
             onDragOver={handleDragOver}
           >
             <div className="mb-6">
-              <label className="block font-mono text-xs uppercase tracking-widest text-neutral-500 mb-2">Secondary Archive (Locked)</label>
+              <div className="flex justify-between items-center mb-2">
+                <label className="block font-mono text-xs uppercase tracking-widest text-neutral-500">Secondary Archive (Locked)</label>
+                {rightAccount && (
+                  <button onClick={() => handleRemoveAccount(rightAccount)} className="text-[10px] text-accent underline hover:text-red-700 cursor-pointer">Disconnect</button>
+                )}
+              </div>
               {subAccountsList.length > 1 ? (
                 <select 
                   className="w-full border-b-2 border-foreground bg-transparent py-2 font-serif text-2xl font-bold focus-visible:outline-none focus-visible:bg-neutral-100 cursor-pointer"

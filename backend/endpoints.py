@@ -265,3 +265,25 @@ async def cancel_transfer(task_id: str, user: models.User = Depends(get_current_
         await db.commit()
         
     return {"status": "cancelled"}
+
+
+@router.delete("/api/accounts/{account_id}")
+async def delete_account(account_id: int, user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import delete
+    result = await db.execute(select(models.DriveAccount).where(
+        models.DriveAccount.id == account_id, 
+        models.DriveAccount.user_id == user.id
+    ))
+    account = result.scalars().first()
+    
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+        
+    await db.execute(delete(models.TransferLog).where(
+        (models.TransferLog.source_account_id == account_id) |
+        (models.TransferLog.dest_account_id == account_id)
+    ))
+    
+    await db.delete(account)
+    await db.commit()
+    return {"status": "success"}
