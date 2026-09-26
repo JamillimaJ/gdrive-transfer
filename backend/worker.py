@@ -113,11 +113,42 @@ def _copy_item(source_service, dest_service, dest_email, file_id, dest_folder_id
             'name': file_name,
             'parents': parents
         }
-        copied_file = dest_service.files().copy(
-            fileId=file_id,
-            body=file_body
-        ).execute()
-        return copied_file.get('id')
+        try:
+            copied_file = dest_service.files().copy(
+                fileId=file_id,
+                body=file_body
+            ).execute()
+            return copied_file.get('id')
+        except Exception as direct_e:
+            print(f"Direct copy failed for {file_name}: {direct_e}")
+            print("Falling back to Owner-Copy Proxy strategy...")
+            # 1. Source account makes a local copy (Source becomes the absolute owner of the copy)
+            proxy_file = source_service.files().copy(
+                fileId=file_id,
+                body={'name': f"PROXY_{file_name}"}
+            ).execute()
+            proxy_id = proxy_file.get('id')
+            
+            try:
+                # 2. Source shares the new proxy file with Destination
+                source_service.permissions().create(
+                    fileId=proxy_id,
+                    body={'type': 'user', 'role': 'reader', 'emailAddress': dest_email},
+                    sendNotificationEmail=False
+                ).execute()
+                
+                # 3. Destination securely copies the proxy file into its final destination
+                final_file = dest_service.files().copy(
+                    fileId=proxy_id,
+                    body=file_body
+                ).execute()
+                return final_file.get('id')
+            finally:
+                # 4. Clean up proxy file from the Source account's root drive
+                try:
+                    source_service.files().delete(fileId=proxy_id).execute()
+                except Exception as cleanup_e:
+                    print(f"Failed to clean up proxy file {proxy_id}: {cleanup_e}")
 
 def _sync_transfer(self, source_account_id, dest_account_id, file_id, dest_folder_id):
     # 1. Fetch credentials

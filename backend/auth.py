@@ -40,7 +40,7 @@ def login(token: str = None):
         "response_type": "code",
         "scope": " ".join(SCOPES),
         "access_type": "offline",
-        "prompt": "consent"
+        "prompt": "select_account"
     }
     
     if token:
@@ -78,7 +78,8 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
         if "error" in token_data:
             raise Exception(f"Google Token Error: {token_data.get('error_description', token_data['error'])}")
 
-        credentials = Credentials(
+        # Create temp credentials to fetch the email
+        temp_credentials = Credentials(
             token=token_data['access_token'],
             refresh_token=token_data.get('refresh_token'),
             token_uri=token_url,
@@ -87,12 +88,9 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
             scopes=SCOPES
         )
         
-        # Get the email of the authenticated user
-        drive_service = build('drive', 'v3', credentials=credentials)
+        drive_service = build('drive', 'v3', credentials=temp_credentials)
         about = drive_service.about().get(fields="user").execute()
         email = about['user']['emailAddress']
-        
-        creds_json = credentials.to_json()
         
         # Determine User
         user = None
@@ -127,17 +125,42 @@ async def callback(request: Request, db: AsyncSession = Depends(get_db)):
         elif len(all_accounts) == 0:
             account_name = "Primary Account"
             
+        final_refresh_token = token_data.get('refresh_token')
+        
         if existing_account:
-            existing_account.credentials = creds_json
+            import json
+            old_creds = json.loads(existing_account.credentials)
+            if not final_refresh_token and old_creds.get('refresh_token'):
+                final_refresh_token = old_creds['refresh_token']
+                
+            # Create final credentials preserving the refresh token
+            final_credentials = Credentials(
+                token=token_data['access_token'],
+                refresh_token=final_refresh_token,
+                token_uri=token_url,
+                client_id=os.environ.get("GOOGLE_CLIENT_ID"),
+                client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
+                scopes=SCOPES
+            )
+            existing_account.credentials = final_credentials.to_json()
+            
             # Force rename if they logged in directly through Google OAuth
             if is_app_login:
                 existing_account.name = "Personal Account"
         else:
+            final_credentials = Credentials(
+                token=token_data['access_token'],
+                refresh_token=final_refresh_token,
+                token_uri=token_url,
+                client_id=os.environ.get("GOOGLE_CLIENT_ID"),
+                client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
+                scopes=SCOPES
+            )
             new_account = models.DriveAccount(
                 user_id=user.id,
                 email=email,
                 name=account_name,
-                credentials=creds_json
+                credentials=final_credentials.to_json()
             )
             db.add(new_account)
             

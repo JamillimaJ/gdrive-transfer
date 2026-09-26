@@ -359,6 +359,17 @@ export default function Home() {
     }
   };
 
+const handleCancel = async (job: ActiveTransfer) => {
+    const token = localStorage.getItem("token");
+    // Optimistic UI update
+    setActiveTransfers(prev => prev.map(t => t.taskId === job.taskId ? { ...t, status: 'CANCELLED' } : t));
+    
+    fetch(`http://localhost:8000/api/transfer/${job.taskId}/cancel`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${token}` }
+    }).catch(() => {});
+  };
+
   const handleClearActiveLog = () => {
     setActiveTransfers([]);
     const token = localStorage.getItem("token");
@@ -475,22 +486,27 @@ export default function Home() {
           <div className="space-y-4 max-h-64 overflow-y-auto pr-4">
             {activeTransfers.map(t => (
               <div key={t.taskId} className="flex flex-col gap-1">
-                <div className="flex justify-between font-mono text-xs uppercase tracking-widest text-foreground font-bold">
+                <div className="flex justify-between font-mono text-xs uppercase tracking-widest text-foreground font-bold items-center">
                   <span className="truncate max-w-[60%]">{t.fileName}</span>
-                  <span className={t.status === 'SUCCESS' ? 'text-green-700' : t.status === 'FAILURE' ? 'text-accent' : ''}>
-                    {t.status === 'SUCCESS' ? 'COMPLETED' : t.status === 'FAILURE' ? 'FAILED' : `${t.progress}%`}
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className={t.status === 'SUCCESS' ? 'text-green-700' : t.status === 'FAILURE' ? 'text-accent' : t.status === 'CANCELLED' ? 'text-orange-500' : ''}>
+                      {t.status === 'SUCCESS' ? 'COMPLETED' : t.status === 'FAILURE' ? 'FAILED' : t.status === 'CANCELLED' ? 'CANCELLED' : `${t.progress}%`}
+                    </span>
+                    {(t.status === 'PENDING' || t.status === 'PROGRESS' || !['SUCCESS', 'FAILURE', 'CANCELLED'].includes(t.status)) && (
+                      <button onClick={() => handleCancel(t)} className="text-[10px] underline hover:text-accent cursor-pointer">CANCEL</button>
+                    )}
+                  </div>
                 </div>
                 <div className="w-full h-2 border border-foreground bg-transparent relative overflow-hidden">
                   <div 
-                    className={`absolute inset-y-0 left-0 transition-all duration-300 ease-out ${t.status === 'SUCCESS' ? 'bg-foreground' : t.status === 'FAILURE' ? 'bg-accent' : 'bg-neutral-400'}`} 
-                    style={{ width: `${t.status === 'SUCCESS' ? 100 : t.progress}%` }}
+                    className={`absolute inset-y-0 left-0 transition-all duration-300 ease-out ${t.status === 'SUCCESS' ? 'bg-foreground' : t.status === 'FAILURE' ? 'bg-accent' : t.status === 'CANCELLED' ? 'bg-orange-500' : 'bg-neutral-400'}`} 
+                    style={{ width: `${t.status === 'SUCCESS' || t.status === 'CANCELLED' ? 100 : t.progress}%` }}
                   ></div>
                 </div>
               </div>
             ))}
           </div>
-          {activeTransfers.every(t => t.status === 'SUCCESS' || t.status === 'FAILURE') && (
+          {activeTransfers.every(t => t.status === 'SUCCESS' || t.status === 'FAILURE' || t.status === 'CANCELLED') && (
             <button 
               onClick={handleClearActiveLog}
               className="mt-6 border-2 border-foreground bg-transparent px-6 py-2 font-mono text-xs font-bold uppercase tracking-widest text-foreground hover:bg-foreground hover:text-background transition-colors w-full"

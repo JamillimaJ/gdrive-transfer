@@ -245,3 +245,23 @@ async def delete_transfer_log(task_id: str, user: models.User = Depends(get_curr
         await db.delete(log)
         await db.commit()
     return {"status": "deleted"}
+
+
+@router.post("/api/transfer/{task_id}/cancel")
+async def cancel_transfer(task_id: str, user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from worker import celery_app
+    # 1. Tell Celery to instantly kill the background task
+    celery_app.control.revoke(task_id, terminate=True, signal='SIGTERM')
+    
+    # 2. Update the database to reflect it was cancelled
+    result = await db.execute(
+        select(models.TransferLog)
+        .where(models.TransferLog.id == task_id, models.TransferLog.user_id == user.id)
+    )
+    log = result.scalars().first()
+    if log:
+        log.status = "CANCELLED"
+        log.error_message = "Cancelled by user"
+        await db.commit()
+        
+    return {"status": "cancelled"}
