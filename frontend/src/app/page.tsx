@@ -714,7 +714,7 @@ const handleRemoveAccount = async (accountId: number) => {
           >
             <div className="mb-6">
               <div className="flex justify-between items-center mb-2">
-                <label className="block font-mono text-xs uppercase tracking-widest text-neutral-500">Secondary Archive (Locked)</label>
+                <label className="block font-mono text-xs uppercase tracking-widest text-neutral-500">Secondary Archive</label>
                 {rightAccount && (
                   <button onClick={() => handleRemoveAccount(rightAccount)} className="text-[10px] text-accent underline hover:text-red-700 cursor-pointer">Disconnect</button>
                 )}

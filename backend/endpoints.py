@@ -290,8 +290,6 @@ async def delete_account(account_id: int, user: models.User = Depends(get_curren
     )
     for log in active_result.scalars().all():
         celery_app.control.revoke(log.id, terminate=True, signal='SIGTERM')
-        log.status = "CANCELLED"
-        log.error_message = "Cancelled by user"
 
     await db.execute(delete(models.TransferLog).where(
         models.TransferLog.user_id == user.id,
