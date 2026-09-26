@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 interface FileItem {
@@ -83,12 +83,12 @@ export default function Home() {
 
   // Persistent History & Auth check
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsMounted(true);
     
     // Load state from session
     const savedLeft = sessionStorage.getItem("leftHistory");
     const savedRight = sessionStorage.getItem("rightHistory");
-    const savedTransfers = localStorage.getItem("transferHistory");
     
     if (savedLeft) setLeftHistory(JSON.parse(savedLeft));
     if (savedRight) setRightHistory(JSON.parse(savedRight));
@@ -167,6 +167,7 @@ export default function Home() {
   // Reset folder history and fetch global publishers if right account CHANGES (not on first load)
   useEffect(() => {
     if (rightAccount !== null && prevRightAccount !== null && rightAccount !== prevRightAccount) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRightHistory([{id: "root", name: "Root Directory"}]);
     }
     if (rightAccount !== null) setPrevRightAccount(rightAccount);
@@ -174,6 +175,7 @@ export default function Home() {
 
   useEffect(() => { 
     if (!leftAccount) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLeftSelected(new Set());
     setLeftOwnerFilter(new Set());
     setLeftSearchQuery("");
@@ -187,6 +189,7 @@ export default function Home() {
   
   useEffect(() => { 
     if (!rightAccount) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRightSelected(new Set());
     setRightOwnerFilter(new Set());
     setRightSearchQuery("");
@@ -252,7 +255,7 @@ export default function Home() {
               }
               return pt;
             }));
-          } catch(e) {}
+          } catch {}
         });
         return prev;
       });
