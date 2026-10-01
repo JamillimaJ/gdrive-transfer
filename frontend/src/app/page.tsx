@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 interface FileItem {
@@ -83,12 +83,12 @@ export default function Home() {
 
   // Persistent History & Auth check
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsMounted(true);
     
     // Load state from session
     const savedLeft = sessionStorage.getItem("leftHistory");
     const savedRight = sessionStorage.getItem("rightHistory");
-    const savedTransfers = localStorage.getItem("transferHistory");
     
     if (savedLeft) setLeftHistory(JSON.parse(savedLeft));
     if (savedRight) setRightHistory(JSON.parse(savedRight));
@@ -167,6 +167,7 @@ export default function Home() {
   // Reset folder history and fetch global publishers if right account CHANGES (not on first load)
   useEffect(() => {
     if (rightAccount !== null && prevRightAccount !== null && rightAccount !== prevRightAccount) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRightHistory([{id: "root", name: "Root Directory"}]);
     }
     if (rightAccount !== null) setPrevRightAccount(rightAccount);
@@ -174,6 +175,7 @@ export default function Home() {
 
   useEffect(() => { 
     if (!leftAccount) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLeftSelected(new Set());
     setLeftOwnerFilter(new Set());
     setLeftSearchQuery("");
@@ -187,6 +189,7 @@ export default function Home() {
   
   useEffect(() => { 
     if (!rightAccount) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRightSelected(new Set());
     setRightOwnerFilter(new Set());
     setRightSearchQuery("");
@@ -252,7 +255,7 @@ export default function Home() {
               }
               return pt;
             }));
-          } catch(e) {}
+          } catch {}
         });
         return prev;
       });
@@ -368,6 +371,24 @@ const handleCancel = async (job: ActiveTransfer) => {
       method: "POST",
       headers: { "Authorization": `Bearer ${token}` }
     }).catch(() => {});
+  };
+
+const handleRemoveAccount = async (accountId: number) => {
+    if (!confirm("Are you sure you want to disconnect this account?")) return;
+    const token = localStorage.getItem("token");
+    try {
+      const res = await fetch(`http://localhost:8000/api/accounts/${accountId}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        window.location.reload();
+      } else {
+        alert("Failed to disconnect account. Please try again.");
+      }
+    } catch {
+      alert("Network error. Failed to disconnect account.");
+    }
   };
 
   const handleClearActiveLog = () => {
@@ -540,7 +561,9 @@ const handleCancel = async (job: ActiveTransfer) => {
             onDragOver={handleDragOver}
           >
             <div className="mb-6">
-              <label className="block font-mono text-xs uppercase tracking-widest text-neutral-500 mb-2">Primary Archive (Locked)</label>
+              <div className="flex justify-between items-center mb-2">
+                <label className="block font-mono text-xs uppercase tracking-widest text-neutral-500">Primary Archive (Locked)</label>
+              </div>
               <div className="w-full border-b-2 border-foreground bg-transparent py-2 font-serif text-2xl font-bold truncate">
                 {primaryAccountDetails ? `${primaryAccountDetails.name} — ${primaryAccountDetails.email}` : "No Primary Account"}
               </div>
@@ -693,7 +716,12 @@ const handleCancel = async (job: ActiveTransfer) => {
             onDragOver={handleDragOver}
           >
             <div className="mb-6">
-              <label className="block font-mono text-xs uppercase tracking-widest text-neutral-500 mb-2">Secondary Archive (Locked)</label>
+              <div className="flex justify-between items-center mb-2">
+                <label className="block font-mono text-xs uppercase tracking-widest text-neutral-500">Secondary Archive</label>
+                {rightAccount && (
+                  <button onClick={() => handleRemoveAccount(rightAccount)} className="text-[10px] text-accent underline hover:text-red-700 cursor-pointer">Disconnect</button>
+                )}
+              </div>
               {subAccountsList.length > 1 ? (
                 <select 
                   className="w-full border-b-2 border-foreground bg-transparent py-2 font-serif text-2xl font-bold focus-visible:outline-none focus-visible:bg-neutral-100 cursor-pointer"

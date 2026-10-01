@@ -146,6 +146,18 @@ from worker import transfer_file_task
 import uuid
 @router.post("/api/transfer")
 async def start_transfer(req: TransferRequest, user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(models.DriveAccount.id).where(
+            models.DriveAccount.user_id == user.id,
+            models.DriveAccount.id.in_([req.source_account_id, req.dest_account_id])
+        )
+    )
+    owned_accounts = set(result.scalars().all())
+    required_accounts = {req.source_account_id, req.dest_account_id}
+    
+    if not required_accounts.issubset(owned_accounts):
+        raise HTTPException(status_code=403, detail="Not authorized to use one or both accounts")
+
     task_id = str(uuid.uuid4())
     log = models.TransferLog(
         id=task_id,
@@ -265,3 +277,38 @@ async def cancel_transfer(task_id: str, user: models.User = Depends(get_current_
         await db.commit()
         
     return {"status": "cancelled"}
+
+
+@router.delete("/api/accounts/{account_id}")
+async def delete_account(account_id: int, user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    from sqlalchemy import delete
+    result = await db.execute(select(models.DriveAccount).where(
+        models.DriveAccount.id == account_id, 
+        models.DriveAccount.user_id == user.id
+    ))
+    account = result.scalars().first()
+    
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    from worker import celery_app
+    active_result = await db.execute(
+        select(models.TransferLog).where(
+            models.TransferLog.user_id == user.id,
+            models.TransferLog.status.in_(["PENDING", "PROGRESS"]),
+            (models.TransferLog.source_account_id == account_id) |
+            (models.TransferLog.dest_account_id == account_id)
+        )
+    )
+    for log in active_result.scalars().all():
+        celery_app.control.revoke(log.id, terminate=True, signal='SIGTERM')
+
+    await db.execute(delete(models.TransferLog).where(
+        models.TransferLog.user_id == user.id,
+        (models.TransferLog.source_account_id == account_id) |
+        (models.TransferLog.dest_account_id == account_id)
+    ))
+
+    await db.delete(account)
+    await db.commit()
+    return {"status": "success"}
