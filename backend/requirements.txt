@@ -1,3 +1,4 @@
+aiosqlite>=0.20
 alembic==1.20.0
 amqp==5.4.0
 annotated-doc==0.0.5
@@ -47,6 +48,7 @@ pydantic-settings==2.15.0
 pydantic_core==2.46.5
 PyJWT==2.15.0
 pyparsing==3.3.3
+pytest>=8.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.3
 python-multipart==0.0.32

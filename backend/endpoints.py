@@ -156,7 +156,7 @@ async def start_transfer(req: TransferRequest, user: models.User = Depends(get_c
     required_accounts = {req.source_account_id, req.dest_account_id}
     
     if not required_accounts.issubset(owned_accounts):
-        raise HTTPException(status_code=403, detail="Not authorized to use one or both accounts")
+        raise HTTPException(status_code=404, detail="Account not found")
 
     task_id = str(uuid.uuid4())
     log = models.TransferLog(

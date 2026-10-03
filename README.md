@@ -26,12 +26,17 @@ You can spin up the entire architecture with a single command.
    cd gdrive-transfer
    ```
 
-2. **Start the Docker cluster:**
+2. **Set the required `SECRET_KEY`** (see [Environment Variables](#-environment-variables)):
+   ```bash
+   export SECRET_KEY=$(openssl rand -hex 32)
+   ```
+
+3. **Start the Docker cluster:**
    ```bash
    docker compose up --build
    ```
 
-3. **Access the application:**
+4. **Access the application:**
    * Frontend (UI): [http://localhost:3000](http://localhost:3000)
    * Backend (API): [http://localhost:8000](http://localhost:8000)
 
@@ -44,5 +49,7 @@ GOOGLE_CLIENT_ID=your_client_id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your_client_secret
 SECRET_KEY=your_jwt_secret_key
 ```
+
+`SECRET_KEY` is **required**: it signs the login JWTs and the backend will not start without it. Generate one with `openssl rand -hex 32`. With Docker Compose it is read from the shell or from a `.env` file in the repository root; `docker compose up` fails if it is unset.
 
 *(Note: Never commit your `.env` file to version control. It is explicitly ignored in this repository.)*
