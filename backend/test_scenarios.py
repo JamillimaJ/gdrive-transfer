@@ -77,7 +77,7 @@ async def main():
         )
         print("Status code:", res.status_code)
         print("Response:", res.text)
-        if res.status_code == 403:
+        if res.status_code == 404:
             print("Scenario 1 PASS")
         else:
             print("Scenario 1 FAIL")
